@@ -56,8 +56,10 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
 pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
     trace!("kernel: sys_task_info");
     let task = get_current_task();
-    ti.status=task.task_status;
-    ti.syscall_times=task.syscall_times;
-    ti.time=get_time_ms()-task.task_start_time;
+    unsafe {
+        (*ti).status = task.task_status;
+        (*ti).syscall_times = task.syscall_times;
+        (*ti).time = get_time_ms() - task.task_start_time;
+    }
     0
 }

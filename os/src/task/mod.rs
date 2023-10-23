@@ -16,6 +16,7 @@ mod task;
 
 use core::cell::RefMut;
 use crate::config::MAX_APP_NUM;
+use crate::config::MAX_SYSCALL_NUM;
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
 use lazy_static::*;
@@ -57,6 +58,7 @@ lazy_static! {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
             task_start_time: 0,
+            syscall_times: [0; MAX_SYSCALL_NUM],
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -147,7 +149,9 @@ impl TaskManager {
     }
 }
 
-pub fn get_current_task() -> RefMut<'_, TaskControlBlock> {
+
+/// Get current `Running` task.
+pub fn get_current_task() -> RefMut<'static, TaskControlBlock> {
     TASK_MANAGER.get_current_task()
 }
 
