@@ -21,8 +21,11 @@ use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
+pub use crate::syscall::{TaskInfo};
 
 pub use context::TaskContext;
+use crate::mm::{MapPermission, VirtAddr};
+use crate::timer::get_time_us;
 
 /// The task manager, where all the tasks are managed.
 ///
@@ -119,6 +122,23 @@ impl TaskManager {
         let inner = self.inner.exclusive_access();
         inner.tasks[inner.current_task].get_user_token()
     }
+    /// add_current_memory_set
+    fn add_current_memory_set(&self,
+                              start_va: VirtAddr,
+                              end_va: VirtAddr,
+                              permission: MapPermission)->bool{
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        return inner.tasks[current].add_user_memory_set(start_va, end_va, permission);
+    }
+    /// remove_current_memory_set
+    fn remove_current_memory_set(&self,
+                              start_va: VirtAddr,
+                              end_va: VirtAddr)->bool{
+        let mut inner = self.inner.exclusive_access();
+        let current_task = inner.current_task;
+        inner.tasks[current_task].remove_user_memory_set(start_va, end_va)
+    }
 
     /// Get the current 'Running' task's trap contexts.
     fn get_current_trap_cx(&self) -> &'static mut TrapContext {
@@ -153,6 +173,37 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+    ///get_current_task_mut
+    fn update_task_info(&self,syscall_id:usize){
+        let mut  inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].syscall_times[syscall_id]+=1;
+    }
+
+    ///
+    ///
+    /// # Arguments
+    ///
+    /// * `ti`:
+    ///
+    /// returns: ()
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///
+    /// ```
+    fn set_task_info(&self,ti: *mut TaskInfo){
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        unsafe {
+            println!("ti = {}",(*ti).time);
+            (*ti).status = inner.tasks[current].task_status;
+            (*ti).syscall_times = inner.tasks[current].syscall_times;
+            (*ti).time = get_time_us()/1000 - inner.tasks[current].task_start_time;
+        }
+    }
+
 }
 
 /// Run the first task in task list.
@@ -201,4 +252,38 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// add_current_memory_set
+pub fn add_current_memory_set(start_va: VirtAddr,
+                              end_va: VirtAddr,
+                              permission: MapPermission)->bool{
+    return TASK_MANAGER.add_current_memory_set(start_va,end_va,permission);
+}
+/// remove_current_memory_set
+pub fn remove_current_memory_set(start_va: VirtAddr,
+                              end_va: VirtAddr)->bool{
+    TASK_MANAGER.remove_current_memory_set(start_va,end_va)
+}
+
+/// Get current `Running` task.
+pub fn update_task_info(syscall_id:usize)  {
+    TASK_MANAGER.update_task_info(syscall_id)
+}
+
+///
+///
+/// # Arguments
+///
+/// * `ti`:
+///
+/// returns: ()
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
+pub fn set_task_info(ti: *mut TaskInfo) {
+    TASK_MANAGER.set_task_info(ti)
 }
