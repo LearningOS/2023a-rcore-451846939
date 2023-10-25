@@ -34,6 +34,7 @@ lazy_static! {
 pub struct MemorySet {
     page_table: PageTable,
     areas: Vec<MapArea>,
+
 }
 
 impl MemorySet {
@@ -54,11 +55,38 @@ impl MemorySet {
         start_va: VirtAddr,
         end_va: VirtAddr,
         permission: MapPermission,
-    ) {
+        is_user: bool,
+    ) -> bool {
+        if is_user {
+            let found_area_index = self.areas.iter().position(|area| {
+
+                let x = area.vpn_range.get_start() < end_va.ceil() && start_va.floor() < area.vpn_range.get_end();
+                // println!("start_va.page_offset():{:?}",start_va.page_offset());
+                // if x {
+                //     println!("area.vpn_range.get_start(): {:?}, end_va.floor(): {:?}", area.vpn_range.get_start(), end_va.floor());
+                //     println!("area.vpn_range.get_end(): {:?}, start_va.floor(): {:?}", area.vpn_range.get_end(), start_va.floor());
+                // }
+                return x;
+            }
+            );
+            // println!("found_area_index: {:?}", found_area_index);
+            if found_area_index.is_some() {
+                return false;
+            }
+        }
         self.push(
             MapArea::new(start_va, end_va, MapType::Framed, permission),
             None,
         );
+        return true;
+    }
+    /// remove_framed_area
+    pub fn remove_framed_area(
+        &mut self,
+        start_va: VirtAddr,
+        end_va: VirtAddr,
+    ) -> bool {
+        self.remove(start_va, end_va)
     }
     /// remove a area
     pub fn remove_area_with_start_vpn(&mut self, start_vpn: VirtPageNum) {
@@ -81,6 +109,19 @@ impl MemorySet {
             map_area.copy_data(&mut self.page_table, data);
         }
         self.areas.push(map_area);
+    }
+
+    fn remove(&mut self, start: VirtAddr, end: VirtAddr) -> bool {
+        // println!("remove: start: {:?}, end: {:?}", start, end);
+        let found_area_index = self.areas.iter().position(|area| area.vpn_range.get_start() == start.floor() && area.vpn_range.get_end() == end.ceil());
+        // println!("found_area_index: {:?}", found_area_index);
+        if let Some(index) = found_area_index {
+            self.areas[index].unmap(&mut self.page_table);
+            self.areas.retain(|area| area.vpn_range.get_start() != start.floor() || area.vpn_range.get_end() != end.ceil());
+            true
+        } else {
+            false
+        }
     }
     /// Mention that trampoline is not collected by areas.
     fn map_trampoline(&mut self) {
@@ -301,9 +342,10 @@ impl MemorySet {
         }
     }
 }
+
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
-    vpn_range: VPNRange,
+    pub(crate) vpn_range: VPNRange,
     data_frames: BTreeMap<VirtPageNum, FrameTracker>,
     map_type: MapType,
     map_perm: MapPermission,

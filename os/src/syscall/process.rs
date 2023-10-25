@@ -10,6 +10,10 @@ use crate::{
         suspend_current_and_run_next, TaskStatus,
     },
 };
+use crate::mm::{mmap, PhysAddr, unmmap, VirtAddr, VirtPageNum};
+use crate::mm::page_table::PageTable;
+use crate::task::{set_task_info, TaskControlBlock};
+use crate::timer::get_time_us;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -22,11 +26,11 @@ pub struct TimeVal {
 #[allow(dead_code)]
 pub struct TaskInfo {
     /// Task status in it's life cycle
-    status: TaskStatus,
+    pub status: TaskStatus,
     /// The numbers of syscall called by task
-    syscall_times: [u32; MAX_SYSCALL_NUM],
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
     /// Total running time of task
-    time: usize,
+    pub time: usize,
 }
 
 /// task exits and submit an exit code
@@ -118,39 +122,73 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    trace!("kernel: sys_get_time");
+    let virt_addr = VirtAddr(_ts as usize);
+    let phys_addr = translate_va(virt_addr);
+    if let Some(phys_addr) = phys_addr {
+        let us = get_time_us();
+        let kernel_ts = phys_addr.0 as *mut TimeVal;
+        unsafe {
+            *kernel_ts = TimeVal {
+                sec: us / 1_000_000,
+                usec: us % 1_000_000,
+            };
+        }
+        0
+    } else {
+        -1
+    }
+}
+
+fn translate_va(virt_addr: VirtAddr) -> Option<PhysAddr> {
+    PageTable::from_token(current_user_token()).translate_va(virt_addr)
+}
+
+pub fn translate_ptr<T>(ptr: *const T) -> *mut T {
+    let page_table: PageTable = PageTable::from_token(current_user_token());
+
+    let start: usize = ptr as usize;
+    let start_va: VirtAddr = VirtAddr::from(start);
+    let vpn: VirtPageNum = start_va.floor();
+    let ppn: PhysAddr = page_table.translate(vpn).unwrap().ppn().into();
+
+    let offset: usize = start_va.page_offset();
+    let phys_addr: usize = ppn.into();
+    let phys_ptr: *mut T = (offset + phys_addr) as *mut T;
+
+    phys_ptr
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
+    trace!("kernel: sys_task_info NOT IMPLEMENTED YET!");
+
+
+    let ti = translate_ptr(_ti);
+    set_task_info(ti);
+
+    return 0;
+}
+
+// YOUR JOB: Implement mmap.
+pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
+    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
+    let ok = mmap(start, len, port);
+    if ok {
+        return 0;
+    }
     -1
 }
 
-/// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
-}
-
-/// YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
+// YOUR JOB: Implement munmap.
+pub fn sys_munmap(start: usize, len: usize) -> isize {
+    trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
+    let ok = unmmap(start, len);
+    if ok {
+        return 0;
+    }
     -1
 }
 
@@ -166,19 +204,43 @@ pub fn sys_sbrk(size: i32) -> isize {
 
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
-pub fn sys_spawn(_path: *const u8) -> isize {
+pub fn sys_spawn(path: *const u8) -> isize {
     trace!(
         "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
+    let token = current_user_token();
+    let path = translated_str(token, path);
+    if let Some(data) = get_app_data_by_name(path.as_str()) {
+        let current_task = current_task().unwrap();
+        let mut parent_inner = current_task.inner_exclusive_access();
+        let new_task = Arc::new(TaskControlBlock::new(data));
+        {
+            let mut new_task_inner = new_task.inner_exclusive_access();
+            new_task_inner.parent = Some(Arc::downgrade(&current_task));
+            parent_inner.children.push(new_task.clone());
+        }
+        let pid = new_task.pid.0 as isize;
+        add_task(new_task);
+        return pid;
+    }
+
     -1
 }
 
 // YOUR JOB: Set task priority.
-pub fn sys_set_priority(_prio: isize) -> isize {
+pub fn sys_set_priority(prio: isize) -> isize {
     trace!(
         "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
+    if prio >= 2 {
+        {
+            let current_task = current_task().unwrap();
+            let mut inner = current_task.inner_exclusive_access();
+            inner.priority= prio as u8;
+        }
+        return prio;
+    }
     -1
 }

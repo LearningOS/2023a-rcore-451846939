@@ -1,13 +1,15 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
-use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
+use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE, MapPermission};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::cell::RefMut;
+use crate::task::TaskInfo;
+use crate::timer::get_time_us;
 
 /// Task control block structure
 ///
@@ -33,6 +35,48 @@ impl TaskControlBlock {
     pub fn get_user_token(&self) -> usize {
         let inner = self.inner_exclusive_access();
         inner.memory_set.token()
+    }
+
+    /// add_user_memory_set
+    pub fn add_user_memory_set(&self, start_va: VirtAddr,
+                               end_va: VirtAddr,
+                               permission: MapPermission) -> bool {
+        return self.inner_exclusive_access().memory_set.insert_framed_area(start_va, end_va, permission, true);
+    }
+    /// remove_user_memory_set
+    pub fn remove_user_memory_set(&self, start_va: VirtAddr,
+                                  end_va: VirtAddr,
+    ) -> bool {
+        return self.inner_exclusive_access().memory_set.remove_framed_area(start_va, end_va);
+    }
+
+    ///get_current_task_mut
+    pub fn update_task_info(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        inner.syscall_times[syscall_id] += 1;
+    }
+
+    ///
+    ///
+    /// # Arguments
+    ///
+    /// * `ti`:
+    ///
+    /// returns: ()
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///
+    /// ```
+    pub fn set_task_info(&self, ti: *mut TaskInfo) {
+        let inner = self.inner.exclusive_access();
+        unsafe {
+            println!("ti = {}", (*ti).time);
+            (*ti).status = inner.task_status;
+            (*ti).syscall_times = inner.syscall_times;
+            (*ti).time = get_time_us() / 1000 - inner.task_start_time;
+        }
     }
 }
 
@@ -68,6 +112,79 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// The task start time
+    pub task_start_time: usize,
+
+    /// The numbers of syscall called by task
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
+
+    /// priority
+    pub priority: u8,
+
+    /// stride
+    pub stride: Stride,
+}
+
+use core::cmp::Ordering;
+use core::ops::AddAssign;
+pub struct ArcTaskControlBlock(pub Arc<TaskControlBlock>);
+impl PartialEq<Self> for TaskControlBlock {
+    fn eq(&self, other: &Self) -> bool {
+        self.pid == other.pid
+    }
+}
+
+impl Eq for ArcTaskControlBlock {
+
+}
+impl Ord for ArcTaskControlBlock{
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.partial_cmp(&other.0).unwrap()
+    }
+}
+impl PartialEq<Self> for ArcTaskControlBlock {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&other.0)
+    }
+}
+
+impl PartialOrd for ArcTaskControlBlock {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        {
+            self.0.partial_cmp(&other.0)
+        }
+    }
+}
+
+impl PartialOrd for TaskControlBlock {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        {
+            let self_inner = self.inner.exclusive_access();
+
+            let other_inner = other.inner.exclusive_access();
+            self_inner.stride.partial_cmp(&other_inner.stride)
+        }
+    }
+}
+#[derive(Debug)]
+pub struct Stride(pub u64);
+impl AddAssign<u8> for Stride {
+    fn add_assign(&mut self, other: u8) {
+        self.0 += other as u64;
+    }
+}
+
+impl PartialOrd for Stride {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Option::from(other.0.cmp(&self.0))
+    }
+}
+
+impl PartialEq for Stride {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
 }
 
 impl TaskControlBlockInner {
@@ -84,6 +201,12 @@ impl TaskControlBlockInner {
     }
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
+    }
+
+    pub fn add_stride(&mut self) {
+        self.stride += self.priority;
+        self.stride=Stride(self.stride.0 % 255);
+        // println!("add task to ready queue:{:?}",self.stride);
     }
 }
 
@@ -118,6 +241,10 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    task_start_time: get_time_us() / 1000,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
+                    priority: 16,
+                    stride: Stride(0),
                 })
             },
         };
@@ -191,6 +318,10 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    task_start_time: 0,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
+                    priority: 16,
+                    stride: Stride(0),
                 })
             },
         });
