@@ -46,8 +46,8 @@ lazy_static! {
     static ref KSTACK_ALLOCATOR: UPSafeCell<RecycleAllocator> =
         unsafe { UPSafeCell::new(RecycleAllocator::new()) };
 }
-
 /// Abstract structure of PID
+#[derive(PartialEq)]
 pub struct PidHandle(pub usize);
 
 impl Drop for PidHandle {
@@ -80,6 +80,7 @@ pub fn kstack_alloc() -> KernelStack {
         kstack_bottom.into(),
         kstack_top.into(),
         MapPermission::R | MapPermission::W,
+        false
     );
     KernelStack(kstack_id)
 }

@@ -13,6 +13,7 @@ use alloc::vec::Vec;
 use bitflags::*;
 use easy_fs::{EasyFileSystem, Inode};
 use lazy_static::*;
+use crate::fs::{Stat, StatMode};
 
 /// inode in memory
 /// A wrapper around a filesystem inode
@@ -115,13 +116,24 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
                 .map(|inode| Arc::new(OSInode::new(readable, writable, inode)))
         }
     } else {
+        println!("open_file:{}",name);
         ROOT_INODE.find(name).map(|inode| {
+            println!("open_file inode :{}",inode.inode_id);
             if flags.contains(OpenFlags::TRUNC) {
                 inode.clear();
             }
             Arc::new(OSInode::new(readable, writable, inode))
         })
     }
+}
+///link
+pub fn link(old_name: &str, new_name: &str) -> bool {
+    ROOT_INODE.link(old_name, new_name)
+}
+
+/// unlink
+pub fn unlink(name: &str) -> bool {
+    ROOT_INODE.unlink(name)
 }
 
 impl File for OSInode {
@@ -155,4 +167,25 @@ impl File for OSInode {
         }
         total_write_size
     }
+
+    fn get_stat(&self,stat:&mut Stat){
+        let inner = self.inner.exclusive_access();
+        let node_id = inner.inode.inode_id as u64;
+        // drop(inner);
+        let count = ROOT_INODE.inode_id_count(node_id as u32);
+        stat.nlink=count;
+
+        let file_mode=if node_id == 0 {
+            StatMode::DIR
+        } else {
+            StatMode::FILE
+        };
+        stat.dev=0;
+        stat.ino= node_id;
+        stat.mode=file_mode
+
+
+    }
 }
+
+

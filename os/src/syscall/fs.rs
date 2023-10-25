@@ -1,7 +1,10 @@
 //! File and filesystem-related syscalls
 use crate::fs::{open_file, OpenFlags, Stat};
 use crate::mm::{translated_byte_buffer, translated_str, UserBuffer};
+use crate::syscall::process::translate_ptr;
 use crate::task::{current_task, current_user_token};
+use crate::fs::link;
+use crate::fs::unlink;
 
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
     trace!("kernel:pid[{}] sys_write", current_task().unwrap().pid.0);
@@ -81,7 +84,19 @@ pub fn sys_fstat(_fd: usize, _st: *mut Stat) -> isize {
         "kernel:pid[{}] sys_fstat NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    // return -1;
+    let task = current_task().unwrap();
+    let inner = task.inner_exclusive_access();
+    if _fd >=inner.fd_table.len() {
+        return -1;
+    }
+    inner.fd_table[_fd].as_ref().map_or(-1, |file| unsafe {
+        let file = file;
+        let ptr = translate_ptr(inner.memory_set.token(),_st);
+        file.get_stat(&mut *ptr);
+        0
+    })
+
 }
 
 /// YOUR JOB: Implement linkat.
@@ -90,7 +105,18 @@ pub fn sys_linkat(_old_name: *const u8, _new_name: *const u8) -> isize {
         "kernel:pid[{}] sys_linkat NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    // return -1;
+    let token = current_task().unwrap().get_user_token();
+    let old_path = translated_str(token, _old_name);
+    let new_path = translated_str(token, _new_name);
+    if old_path==new_path {
+        return -1;
+    }
+    let link = link(old_path.as_str(), new_path.as_str());
+    if !link {
+        return -1;
+    }
+    0
 }
 
 /// YOUR JOB: Implement unlinkat.
@@ -99,5 +125,13 @@ pub fn sys_unlinkat(_name: *const u8) -> isize {
         "kernel:pid[{}] sys_unlinkat NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    // return -1;
+    let token = current_task().unwrap().get_user_token();
+    let path = translated_str(token, _name);
+    let unlink = unlink(path.as_str());
+    if unlink {
+        0
+    }else {
+        -1
+    }
 }

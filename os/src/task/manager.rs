@@ -1,12 +1,14 @@
 //!Implementation of [`TaskManager`]
 use super::TaskControlBlock;
 use crate::sync::UPSafeCell;
-use alloc::collections::VecDeque;
+use alloc::collections::{BinaryHeap};
 use alloc::sync::Arc;
 use lazy_static::*;
+use crate::task::task::ArcTaskControlBlock;
+
 ///A array of `TaskControlBlock` that is thread-safe
 pub struct TaskManager {
-    ready_queue: VecDeque<Arc<TaskControlBlock>>,
+    ready_queue: BinaryHeap<ArcTaskControlBlock>,
 }
 
 /// A simple FIFO scheduler.
@@ -14,16 +16,23 @@ impl TaskManager {
     ///Creat an empty TaskManager
     pub fn new() -> Self {
         Self {
-            ready_queue: VecDeque::new(),
+            ready_queue: BinaryHeap::new(),
         }
     }
     /// Add process back to ready queue
     pub fn add(&mut self, task: Arc<TaskControlBlock>) {
-        self.ready_queue.push_back(task);
+        {
+            let mut inner = task.inner_exclusive_access();
+            inner.add_stride();
+            // drop(inner);
+        }
+        let task = ArcTaskControlBlock(task);
+        self.ready_queue.push(task);
     }
     /// Take a process out of the ready queue
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.ready_queue.pop_front()
+        let option = self.ready_queue.pop();
+        option.map(|task| task.0)
     }
 }
 

@@ -17,7 +17,7 @@
 //!
 //! We then call [`task::run_tasks()`] and for the first time go to
 //! userspace.
-
+#![feature(core_intrinsics)]
 #![deny(missing_docs)]
 #![deny(warnings)]
 #![no_std]
