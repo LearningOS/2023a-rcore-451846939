@@ -4,6 +4,8 @@ use crate::{
     trap::{trap_handler, TrapContext},
 };
 use alloc::sync::Arc;
+use alloc::vec;
+
 /// thread create syscall
 pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
     trace!(
@@ -41,6 +43,25 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
         tasks.push(None);
     }
     tasks[new_task_tid] = Some(Arc::clone(&new_task));
+    let mutex_list_size = process_inner.mutex_list.len();
+    let semaphore_list_len = process_inner.semaphore_list.len();
+    // let max_size=mutex_list_size.max(semaphore_list_len);
+    for i in process_inner.allocation.len()..new_task_tid + 1 {
+        process_inner.allocation.push(vec![vec![];2]);
+        process_inner.allocation[i][0].resize(mutex_list_size,0);
+        process_inner.allocation[i][1].resize(semaphore_list_len,0);
+        // let vec1 = process_inner.allocation[new_task_tid - 1].clone();
+        // process_inner.allocation.push(vec1);
+    }
+    for i in  process_inner.need.len() .. new_task_tid + 1 {
+        process_inner.need.push(vec![vec![];2]);
+        process_inner.need[i][0].resize(mutex_list_size,0);
+        process_inner.need[i][1].resize(semaphore_list_len,0);
+        // let vec1 = process_inner.need[new_task_tid - 1].clone();
+        // process_inner.need.push(vec1);
+    }
+    // process_inner.available[0][0]+=1;
+    // process_inner.available[1][0]+=1;
     let new_task_trap_cx = new_task_inner.get_trap_cx();
     *new_task_trap_cx = TrapContext::app_init_context(
         entry,
